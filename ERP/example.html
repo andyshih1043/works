@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+    <meta charset="UTF-8">
+    <title>條碼即時拍照圈選辨識 Demo</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        #videoPreview,
+        #photoCanvas {
+            width: 100%;
+            max-width: 400px;
+            margin: auto;
+            background: #222;
+            border-radius: 0.5em;
+            display: block;
+        }
+
+        #canvasWrapper {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            margin: auto;
+        }
+
+        #selectRect {
+            position: absolute;
+            border: 2px dashed #198754;
+            background: rgba(25, 135, 84, 0.15);
+            pointer-events: none;
+            display: none;
+            transition: all 0.1s ease-out;
+        }
+    </style>
+</head>
+
+<body class="bg-light">
+    <div class="container py-4">
+        <h3 class="mb-3">條碼即時拍照圈選辨識 Demo</h3>
+
+        <!-- 按鈕區：啟用相機 / 重新拍照 -->
+        <div id="buttonSection" class="mb-3 text-center">
+            <button id="openCamera" class="btn btn-success">啟用相機</button>
+            <button id="retake" class="btn btn-warning d-none">重新拍照</button>
+        </div>
+
+        <!-- 相機預覽區 -->
+        <div id="cameraSection" class="mb-3 d-none text-center">
+            <video id="videoPreview" autoplay playsinline></video>
+            <div class="mt-2">
+                <button id="takePhoto" class="btn btn-primary">拍照</button>
+                <button id="closeCamera" class="btn btn-secondary">關閉相機</button>
+            </div>
+        </div>
+
+        <!-- 拍照後裁切區 -->
+        <div id="canvasSection" class="mb-3 d-none">
+            <div id="canvasWrapper">
+                <canvas id="photoCanvas"></canvas>
+                <div id="selectRect"></div>
+            </div>
+            <div class="mt-2 text-center">
+                <button id="confirmCrop" class="btn btn-success" disabled>辨識圈選區域</button>
+            </div>
+        </div>
+
+        <!-- 結果顯示區 -->
+        <div class="mb-3">
+            <label class="form-label">條碼辨識結果</label>
+            <input type="text" id="barcodeInput" class="form-control" readonly>
+        </div>
+        <div class="mb-3 text-center">
+            <label class="form-label">圖片預覽（將上傳）</label><br>
+            <img id="previewImg" class="img-fluid rounded border d-none" style="max-width:200px;">
+        </div>
+    </div>
+
+    <!-- ZXing 條碼庫 -->
+    <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
+    <script>
+        const openCameraBtn = document.getElementById('openCamera');
+        const retakeBtn = document.getElementById('retake');
+        const cameraSection = document.getElementById('cameraSection');
+        const video = document.getElementById('videoPreview');
+        const takePhotoBtn = document.getElementById('takePhoto');
+        const closeCameraBtn = document.getElementById('closeCamera');
+        const canvasSection = document.getElementById('canvasSection');
+        const photoCanvas = document.getElementById('photoCanvas');
+        const selectRect = document.getElementById('selectRect');
+        const confirmCropBtn = document.getElementById('confirmCrop');
+        const barcodeInput = document.getElementById('barcodeInput');
+        const previewImg = document.getElementById('previewImg');
+
+        let stream = null, imageDataUrl = '', cropRect = null;
+
+        // 啟動相機
+        openCameraBtn.addEventListener('click', async () => {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                video.srcObject = stream;
+                openCameraBtn.classList.add('d-none');
+                cameraSection.classList.remove('d-none');
+                retakeBtn.classList.add('d-none');
+                canvasSection.classList.add('d-none');
+                barcodeInput.value = '';
+                previewImg.classList.add('d-none');
+            } catch (err) {
+                alert('無法啟用相機，請確認權限或瀏覽器支援性');
+            }
+        });
+
+        // 拍照
+        takePhotoBtn.addEventListener('click', () => {
+            // 設定 canvas 尺寸並繪製當前影像
+            photoCanvas.width = video.videoWidth;
+            photoCanvas.height = video.videoHeight;
+            photoCanvas.getContext('2d').drawImage(video, 0, 0);
+            imageDataUrl = photoCanvas.toDataURL('image/png');
+
+            // 顯示預覽
+            previewImg.src = imageDataUrl;
+            previewImg.classList.remove('d-none');
+
+            // 切換區塊
+            cameraSection.classList.add('d-none');
+            canvasSection.classList.remove('d-none');
+            retakeBtn.classList.remove('d-none');
+        });
+
+        // 關閉相機
+        closeCameraBtn.addEventListener('click', () => {
+            stream.getTracks().forEach(t => t.stop());
+            video.srcObject = null;
+            cameraSection.classList.add('d-none');
+            openCameraBtn.classList.remove('d-none');
+        });
+
+        // 重新拍照
+        retakeBtn.addEventListener('click', () => {
+            selectRect.style.display = 'none';
+            confirmCropBtn.disabled = true;
+            canvasSection.classList.add('d-none');
+            openCameraBtn.click();
+        });
+
+        // 圈選功能
+        let isDrawing = false, startX = 0, startY = 0;
+        photoCanvas.addEventListener('pointerdown', e => {
+            isDrawing = true;
+            const r = photoCanvas.getBoundingClientRect();
+            startX = e.clientX - r.left; startY = e.clientY - r.top;
+            Object.assign(selectRect.style, {
+                left: `${startX}px`, top: `${startY}px`,
+                width: '0px', height: '0px', display: 'block'
+            });
+        });
+        photoCanvas.addEventListener('pointermove', e => {
+            if (!isDrawing) return;
+            const r = photoCanvas.getBoundingClientRect();
+            const x = Math.min(e.clientX - r.left, startX);
+            const y = Math.min(e.clientY - r.top, startY);
+            const w = Math.abs(e.clientX - r.left - startX);
+            const h = Math.abs(e.clientY - r.top - startY);
+            Object.assign(selectRect.style, { left: `${x}px`, top: `${y}px`, width: `${w}px`, height: `${h}px` });
+        });
+        window.addEventListener('pointerup', e => {
+            if (!isDrawing) return;
+            isDrawing = false;
+            const r = photoCanvas.getBoundingClientRect();
+            const endX = e.clientX - r.left, endY = e.clientY - r.top;
+            cropRect = {
+                x: Math.min(startX, endX),
+                y: Math.min(startY, endY),
+                w: Math.abs(endX - startX),
+                h: Math.abs(endY - startY)
+            };
+            confirmCropBtn.disabled = !(cropRect.w > 10 && cropRect.h > 10);
+        });
+
+        // 辨識條碼 & 上傳
+        confirmCropBtn.addEventListener('click', () => {
+            // 建立暫存 canvas 進行裁切
+            const tmp = document.createElement('canvas');
+            tmp.width = cropRect.w; tmp.height = cropRect.h;
+            tmp.getContext('2d').drawImage(photoCanvas,
+                cropRect.x, cropRect.y, cropRect.w, cropRect.h,
+                0, 0, cropRect.w, cropRect.h
+            );
+            const cropDataUrl = tmp.toDataURL('image/png');
+
+            // ZXing 解碼
+            ZXing.BrowserBarcodeReader.decodeFromImage(undefined, cropDataUrl)
+                .then(res => {
+                    barcodeInput.value = res.text;
+                })
+                .catch(() => {
+                    alert('辨識失敗，請重新圈選或拍照');
+                });
+
+            // 上傳整張影像
+            fetch('/api/upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: imageDataUrl })
+            })
+                .then(resp => {
+                    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                    return resp.json();
+                })
+                .then(json => console.log('上傳成功', json))
+                .catch(err => console.error('上傳失敗', err));
+        });
+    </script>
+    
+</body>
+
+</html>
