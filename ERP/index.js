@@ -117,24 +117,41 @@ async function startBarcodeScanning() {
     while (scanning) {
         if (!scanning) return;
         scan_btn.classList.add("scanning");
-        photo_canvas.width = video.videoWidth;
-        photo_canvas.height = video.videoHeight;
-        photo_canvas.getContext('2d').drawImage(video, 0, 0);
+photo_canvas.width = video.videoWidth;
+photo_canvas.height = video.videoHeight;
+photo_canvas.getContext('2d').drawImage(video, 0, 0);
 
-        // 用 video 實際顯示的 CSS 寬高去算 barcode-area 在畫面上的比例
-        const videoRect = video.getBoundingClientRect();
-        const barcodeArea = document.querySelector('.barcode-area');
-        const barcodeRect = barcodeArea.getBoundingClientRect();
+const videoRect = video.getBoundingClientRect();
+const barcodeArea = document.querySelector('.barcode-area');
+const barcodeRect = barcodeArea.getBoundingClientRect();
 
-        // 計算 Y 軸、寬高的比例
-        const scaleY = video.videoHeight / videoRect.height;
-        const scaleX = video.videoWidth / videoRect.width;
+const videoAspect = video.videoWidth / video.videoHeight;
+const viewAspect = videoRect.width / videoRect.height;
+let contentWidth, contentHeight, contentLeft, contentTop;
 
-        // barcode-area 區域在 video 畫面的相對位置
-        const cropX = (barcodeRect.left - videoRect.left) * scaleX;
-        const cropY = (barcodeRect.top - videoRect.top) * scaleY;
-        const cropW = barcodeRect.width * scaleX;
-        const cropH = barcodeRect.height * scaleY;
+if (videoAspect > viewAspect) {
+    // video左右裁掉
+    contentHeight = videoRect.height;
+    contentWidth = videoRect.height * videoAspect;
+    contentLeft = videoRect.left - (contentWidth - videoRect.width) / 2;
+    contentTop = videoRect.top;
+} else {
+    // video上下裁掉
+    contentWidth = videoRect.width;
+    contentHeight = videoRect.width / videoAspect;
+    contentLeft = videoRect.left;
+    contentTop = videoRect.top - (contentHeight - videoRect.height) / 2;
+}
+
+const relLeft = (barcodeRect.left - contentLeft) / contentWidth;
+const relTop = (barcodeRect.top - contentTop) / contentHeight;
+const relWidth = barcodeRect.width / contentWidth;
+const relHeight = barcodeRect.height / contentHeight;
+
+const cropX = relLeft * video.videoWidth;
+const cropY = relTop * video.videoHeight;
+const cropW = relWidth * video.videoWidth;
+const cropH = relHeight * video.videoHeight;
 
         // 新 canvas 裁切
         const cropCanvas = document.createElement('canvas');
@@ -154,8 +171,9 @@ async function startBarcodeScanning() {
             const codeReader = new ZXing.BrowserBarcodeReader();
             const dataURL = cropCanvas.toDataURL('image/png');
             img.src = dataURL;
-            // temp_image.src = dataURL;
-            // temp_image.classList.remove("d-none");
+            temp_image.src = dataURL;
+
+            temp_image.classList.remove("d-none");
             await new Promise(res => {
                 img.onload = async () => {
                     try {
